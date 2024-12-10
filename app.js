@@ -1,40 +1,137 @@
-// Importa los módulos necesarios
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
+const swaggerJsDoc = require('swagger-jsdoc');
+const swaggerUi = require('swagger-ui-express');
+const fetch = require('node-fetch'); // Simular cliente HTTP
+const { io: ClientIo } = require('socket.io-client');
 
-// Inicializa Express y crea el servidor HTTP
+// Initialises Express and creates the HTTP server
 const app = express();
 const server = http.createServer(app);
-
-// Inicializa Socket.IO
 const io = socketIo(server);
 
-// Servidor: Configuración de Socket.IO
+// Swagger Configuration
+const swaggerOptions = {
+    swaggerDefinition: {
+        openapi: '3.0.0',
+        info: {
+            title: 'Socket.IO API Server',
+            description: 'Socket.IO API documented with Swagger',
+            version: '1.0.0',
+        },
+        servers: [
+            { url: 'http://localhost:8000', description: 'Servidor API' },
+        ],
+    },
+    apis: ['./app.js'],
+};
+
+const swaggerDocs = swaggerJsDoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+
+// Middleware to parse JSON
+app.use(express.json());
+
+// Socket.IO configuration on the server
 io.on('connection', (socket) => {
-    console.log('Cliente conectado');
+    console.log('Client logged in (Socket.IO)');
 
-    // Enviar un mensaje al cliente cuando se conecta
-    socket.emit('message', 'Hola Mundo desde SocketIO Servidor en javascript');
+    socket.emit('message', { message: 'Hello from the Socket.IO server' });
 
-    // Escuchar mensajes del cliente
     socket.on('clientMessage', (msg) => {
-        console.log('Mensaje del cliente:', msg);
+        console.log('Message received from customer (Socket.IO):', msg);
     });
 
-    // Desconexión del cliente
     socket.on('disconnect', () => {
-        console.log('Cliente desconectado');
+        console.log('Client disconnected');
     });
 });
 
-// Configurar la ruta para servir el cliente HTML
-app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/index.html');
+/**
+ * @swagger
+ * /api/message:
+ *   get:
+ *     summary: Returns a JSON message
+ *     responses:
+ *       200:
+ *         description: Welcome message.
+ */
+app.get('/api/message', (req, res) => {
+    res.json({ message: 'Hello World from the API route' });
 });
 
-// Iniciar el servidor
-const PORT = 3000;
+/**
+ * @swagger
+ * /api/socket-message:
+ *   post:
+ *     summary: Send a message to Socket.IO
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               clientMessage:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Message sent successfully.
+ */
+app.post('/api/socket-message', (req, res) => {
+    const { clientMessage } = req.body;
+    console.log('Message received from the client by HTTP POST:', clientMessage);
+
+    // Broadcast message to all connected clients
+    io.emit('message', { message: clientMessage });
+
+    res.json({ status: 'Message sent via Socket.IO' });
+});
+
+// Initialising the server
+const PORT = 8000;
 server.listen(PORT, () => {
-    console.log(`Servidor escuchando en http://localhost:${PORT}`);
+    console.log(`Server listening in: http://localhost:${PORT}`);
+    console.log(`Server message in: http://localhost:${PORT}/api/message`);
+    console.log(`Swagger API Docs: http://localhost:${PORT}/api-docs`);
+
+    // ============================
+    // Integrated Client
+    // ============================
+    console.log('\n--- Simulating Client ---');
+
+    // Cliente HTTP con fetch
+    fetch(`http://localhost:${PORT}/api/message`)
+        .then((res) => res.json())
+        .then((data) => {
+            console.log('Response HTTP GET /api/message:', data);
+        });
+
+    fetch(`http://localhost:${PORT}/api/socket-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientMessage: 'Hello from the embedded HTTP client' }),
+    })
+        .then((res) => res.json())
+        .then((data) => {
+            console.log('Response HTTP POST /api/socket-message:', data);
+        });
+
+    // Cliente Socket.IO
+    const clientSocket = ClientIo(`http://localhost:${PORT}`);
+
+    clientSocket.on('connect', () => {
+        console.log('Socket.IO client connected to the server');
+
+        clientSocket.emit('clientMessage', 'Hello from the embedded Socket.IO client');
+    });
+
+    clientSocket.on('message', (data) => {
+        console.log('Message received from the server (Socket.IO):', data.message);
+    });
+
+    clientSocket.on('disconnect', () => {
+        console.log('Socket.IO client disconnected');
+    });
 });
